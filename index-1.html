@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ارسال موقعیت مکانی</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --accent:#22c55e; --accent-dark:#16a34a;
+    --text:#f1f5f9; --muted:#94a3b8; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:Tahoma, "Segoe UI", sans-serif; display:flex; align-items:center;
+    justify-content:center; padding:20px;
+  }
+  .card{
+    background:var(--card); border-radius:20px; padding:28px 22px; width:100%;
+    max-width:380px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,.4);
+  }
+  h1{font-size:20px; margin:0 0 6px}
+  p.sub{color:var(--muted); font-size:14px; margin:0 0 24px}
+  button{
+    width:100%; padding:16px; font-size:16px; border:none; border-radius:14px;
+    background:var(--accent); color:#06250f; font-weight:bold; cursor:pointer;
+    transition:transform .1s, background .2s;
+  }
+  button:active{transform:scale(.97); background:var(--accent-dark)}
+  button:disabled{opacity:.6}
+  button.stop{background:var(--danger); color:#2a0a0a}
+  .status{margin-top:18px; font-size:14px; min-height:20px; color:var(--muted)}
+  .status.error{color:var(--danger)}
+  .status.live{color:var(--accent)}
+  .address-box{
+    margin-top:18px; background:#0b1222; border:1px solid #334155;
+    border-radius:12px; padding:14px; font-size:14px; line-height:1.8; display:none;
+    text-align:right;
+  }
+  .address-box.show{display:block}
+  .badge{
+    display:inline-block; margin-top:14px; font-size:12px; color:var(--muted);
+    border:1px solid #334155; border-radius:999px; padding:4px 12px;
+  }
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:#475569; margin-left:6px; vertical-align:middle}
+  .dot.on{background:var(--accent); box-shadow:0 0 8px var(--accent)}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📍 ارسال موقعیت زنده</h1>
+    <p class="sub">با زدن دکمه زیر، تا وقتی این صفحه باز است، موقعیتت هر ۱۵ ثانیه خودکار برای ربات ارسال می‌شود.</p>
+    <button id="btn">شروع ارسال خودکار</button>
+    <div class="status" id="status"></div>
+    <div class="address-box" id="addressBox"></div>
+    <div class="badge"><span class="dot" id="dot"></span><span id="badgeText">غیرفعال</span></div>
+  </div>
+
+<script>
+  const btn = document.getElementById('btn');
+  const statusEl = document.getElementById('status');
+  const addressBox = document.getElementById('addressBox');
+  const dot = document.getElementById('dot');
+  const badgeText = document.getElementById('badgeText');
+
+  const params = new URLSearchParams(window.location.search);
+  const uid = params.get('uid');
+  const SERVER_URL = window.location.origin;
+
+  const INTERVAL_MS = 15000; // هر ۱۵ ثانیه
+  let timer = null;
+  let running = false;
+
+  function setStatus(text, cls){
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  function setBadge(on, text){
+    dot.classList.toggle('on', on);
+    badgeText.textContent = text;
+  }
+
+  function getPositionOnce(){
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, (err) => {
+        if (err.code === 3) {
+          // GPS دقیق جواب نداد، موقعیت تقریبی را امتحان کن
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false, timeout: 20000, maximumAge: 60000
+          });
+        } else {
+          reject(err);
+        }
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+    });
+  }
+
+  async function reverseGeocode(lat, lng){
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=fa`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data.display_name || `${lat}, ${lng}`;
+  }
+
+  async function sendOnce(){
+    try {
+      setStatus('در حال گرفتن موقعیت...', 'live');
+      const pos = await getPositionOnce();
+      const { latitude, longitude } = pos.coords;
+      const addr = await reverseGeocode(latitude, longitude);
+      await fetch(SERVER_URL + '/api/location', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ uid, lat: latitude, lng: longitude, address: addr })
+      });
+      addressBox.textContent = addr;
+      addressBox.classList.add('show');
+      const now = new Date().toLocaleTimeString('fa-IR');
+      setStatus('✅ آخرین بروزرسانی: ' + now, 'live');
+    } catch(e) {
+      const map = {1:'اجازه داده نشد', 2:'در دسترس نیست', 3:'زمان تمام شد'};
+      const msg = e && e.code ? (map[e.code] || e.message) : (e.message || 'خطای نامشخص');
+      setStatus('خطا: ' + msg, 'error');
+    }
+  }
+
+  function start(){
+    if(!uid){
+      setStatus('این لینک معتبر نیست. از همان لینکی که ربات فرستاده استفاده کن.', 'error');
+      return;
+    }
+    if(!navigator.geolocation){
+      setStatus('مرورگر شما از موقعیت مکانی پشتیبانی نمی‌کند.', 'error');
+      return;
+    }
+    running = true;
+    btn.textContent = 'توقف ارسال خودکار';
+    btn.classList.add('stop');
+    setBadge(true, 'فعال - صفحه را باز نگه دار');
+    sendOnce();
+    timer = setInterval(sendOnce, INTERVAL_MS);
+  }
+
+  function stop(){
+    running = false;
+    clearInterval(timer);
+    btn.textContent = 'شروع ارسال خودکار';
+    btn.classList.remove('stop');
+    setBadge(false, 'غیرفعال');
+    setStatus('ارسال متوقف شد.');
+  }
+
+  btn.addEventListener('click', () => {
+    if(running) stop(); else start();
+  });
+
+  // وقتی کاربر از صفحه بیرون می‌رود (تب عوض می‌کند) هشدار بده که ارسال متوقف می‌شود
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden && running){
+      setBadge(true, 'فعال (توجه: اگر صفحه را ببندی متوقف می‌شود)');
+    }
+  });
+</script>
+</body>
+</html>
