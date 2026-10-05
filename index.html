@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ارسال موقعیت مکانی</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --accent:#22c55e; --accent-dark:#16a34a;
+    --text:#f1f5f9; --muted:#94a3b8; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+    font-family:Tahoma, "Segoe UI", sans-serif; display:flex; align-items:center;
+    justify-content:center; padding:20px;
+  }
+  .card{
+    background:var(--card); border-radius:20px; padding:28px 22px; width:100%;
+    max-width:380px; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,.4);
+  }
+  h1{font-size:20px; margin:0 0 6px}
+  p.sub{color:var(--muted); font-size:14px; margin:0 0 24px}
+  button{
+    width:100%; padding:16px; font-size:16px; border:none; border-radius:14px;
+    background:var(--accent); color:#06250f; font-weight:bold; cursor:pointer;
+    transition:transform .1s, background .2s;
+  }
+  button:active{transform:scale(.97); background:var(--accent-dark)}
+  button:disabled{opacity:.6}
+  .status{margin-top:18px; font-size:14px; min-height:20px; color:var(--muted)}
+  .status.error{color:var(--danger)}
+  .address-box{
+    margin-top:18px; background:#0b1222; border:1px solid #334155;
+    border-radius:12px; padding:14px; font-size:14px; line-height:1.8; display:none;
+    text-align:right;
+  }
+  .address-box.show{display:block}
+  .spinner{
+    width:18px; height:18px; border:3px solid #334155; border-top-color:var(--accent);
+    border-radius:50%; display:inline-block; vertical-align:middle; margin-left:8px;
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>📍 ارسال موقعیت</h1>
+    <p class="sub">با زدن دکمه زیر، مرورگر از شما اجازه دسترسی به موقعیت مکانی را می‌خواهد.</p>
+    <button id="btn">ارسال موقعیت من</button>
+    <div class="status" id="status"></div>
+    <div class="address-box" id="addressBox"></div>
+  </div>
+
+<script>
+  const btn = document.getElementById('btn');
+  const statusEl = document.getElementById('status');
+  const addressBox = document.getElementById('addressBox');
+
+  // uid از لینک شخصی هر کاربر می‌آید، مثال: index.html?uid=123456789
+  const params = new URLSearchParams(window.location.search);
+  const uid = params.get('uid');
+
+  // آدرس سرور خودت را اینجا بگذار (همان سروری که server.py روی آن اجرا می‌شود)
+  const SERVER_URL = window.location.origin; // اگر صفحه و سرور یکی هستند نیازی به تغییر نیست
+
+  function setStatus(text, isError){
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (isError ? ' error' : '');
+  }
+
+  btn.addEventListener('click', () => {
+    if(!uid){
+      setStatus('این لینک معتبر نیست. لطفاً از همان لینکی که ربات برایتان فرستاده استفاده کنید.', true);
+      return;
+    }
+    if(!navigator.geolocation){
+      setStatus('مرورگر شما از موقعیت مکانی پشتیبانی نمی‌کند.', true);
+      return;
+    }
+    btn.disabled = true;
+    setStatus('در حال گرفتن موقعیت...');
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      setStatus('در حال یافتن آدرس...');
+      try {
+        const addr = await reverseGeocode(latitude, longitude);
+        setStatus('در حال ارسال به سرور...');
+        await fetch(SERVER_URL + '/api/location', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ uid, lat: latitude, lng: longitude, address: addr })
+        });
+        addressBox.textContent = addr;
+        addressBox.classList.add('show');
+        setStatus('✅ موقعیت با موفقیت ارسال شد.');
+      } catch(e) {
+        setStatus('خطا در ارسال موقعیت: ' + e.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    }, (err) => {
+      setStatus('اجازه دسترسی به موقعیت داده نشد یا خطا رخ داد.', true);
+      btn.disabled = false;
+    }, { enableHighAccuracy: true, timeout: 15000 });
+  });
+
+  async function reverseGeocode(lat, lng){
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=fa`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data.display_name || `${lat}, ${lng}`;
+  }
+</script>
+</body>
+</html>
